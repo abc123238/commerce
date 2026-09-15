@@ -77,13 +77,13 @@ ai-commerce-platform/
 │   ├── main.py / config.py
 │   ├── api/v1/            # auth / products / cart / orders / chat / analytics
 │   ├── core/              # security(JWT+RBAC) / logging / trace / rate_limit
-│   ├── db/models/         # user / product / cart / order / payment
-│   ├── agent/             # graph / nodes / tools / prompts / intent / memory
-│   ├── rag/               # embeddings / vectorstore / hybrid / ingest / citation
-│   ├── observability/     # langfuse / middleware / metrics / events
+│   ├── db/models/         # user / product / cart / order（Payment 定义在 order.py）
+│   ├── agent/             # graph / nodes / tools / prompts / intent / llm / state
+│   ├── rag/               # embeddings / vectorstore / sparse / ingest / citation
+│   ├── observability/     # langfuse / middleware / metrics
 │   └── schemas/
 ├── eval/                  # runner / judge / report + 三数据集 + 指标
-├── scripts/               # init_db / seed / ingest_kb / smoke / verify_flow
+├── scripts/               # seed / ingest_kb / smoke / verify_flow / verify_order_flow
 ├── data/knowledge_base/   # 客服 RAG 语料
 ├── docs/                  # architecture / observability / eval / interview_prep
 ├── examples/              # mcp_demo_server.py（MCP 演示）
