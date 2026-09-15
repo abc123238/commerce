@@ -1,0 +1,10 @@
+{"question": "无线蓝牙耳机降噪效果怎么样", "golden_doc_ids": ["products:无线蓝牙耳机", "products:降噪与音质"]}
+{"question": "机械键盘支持哪些灯效", "golden_doc_ids": ["products:机械键盘", "products:灯效与自定义"]}
+{"question": "七天无理由退换怎么申请", "golden_doc_ids": ["returns:七天无理由退换"]}
+{"question": "订单一般几天能送到", "golden_doc_ids": ["shipping:配送时效", "shipping:发货流程"]}
+{"question": "支持哪些支付方式", "golden_doc_ids": ["payment:支持方式"]}
+{"question": "如何查询订单状态", "golden_doc_ids": ["faq:如何查询订单状态"]}
+{"question": "智能手表能测血氧吗", "golden_doc_ids": ["products:智能手表", "products:健康监测"]}
+{"question": "充电宝能带上飞机吗", "golden_doc_ids": ["products:便携充电宝", "products:充电安全"]}
+{"question": "退货运费谁承担", "golden_doc_ids": ["returns:七天无理由退换", "returns:特别说明"]}
+{"question": "忘记密码怎么办", "golden_doc_ids": ["faq:忘记密码怎么办"]}

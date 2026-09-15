@@ -1,0 +1,5 @@
+{"question": "我的订单 ORDDEMO000000000002 现在是什么状态", "expected_tools": ["query_order"], "expected_fields": ["已支付"], "requires_citation": false, "golden_answer": "订单 ORDDEMO000000000002 已支付，金额 399.00 元"}
+{"question": "无线蓝牙耳机多少钱", "expected_tools": ["query_product"], "expected_fields": ["399"], "requires_citation": false, "golden_answer": "无线蓝牙耳机售价 399.00 元"}
+{"question": "机械键盘还有库存吗", "expected_tools": ["query_product"], "expected_fields": ["库存"], "requires_citation": false, "golden_answer": "机械键盘当前有货"}
+{"question": "用优惠码 NEWUSER 买机械键盘能便宜多少", "expected_tools": ["query_product", "calc_discount"], "expected_fields": ["优惠"], "requires_citation": false, "golden_answer": "NEWUSER 优惠 50 元，应付 249 元"}
+{"question": "怎么申请七天无理由退货", "expected_tools": [], "expected_fields": ["退换"], "requires_citation": true, "golden_answer": "签收后 7 天内支持无理由退换，商品需保持完好"}

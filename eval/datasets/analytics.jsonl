@@ -1,0 +1,4 @@
+{"question": "今天的销售额按品类汇总一下", "expected_tools": ["current_date", "query_sales_summary"], "expected_fields": ["电子产品"], "golden_answer": "今日电子产品品类销售额若干元"}
+{"question": "最近一周总销售额大概是多少", "expected_tools": ["current_date", "query_sales_summary"], "expected_fields": ["¥"], "golden_answer": "最近一周总销售额若干元"}
+{"question": "哪个商品卖得最好，出个畅销榜", "expected_tools": ["top_products"], "expected_fields": [], "golden_answer": "畅销榜按销售额列出商品"}
+{"question": "对比今天和昨天的销售额增长了多少", "expected_tools": ["current_date", "query_sales_summary", "calc_growth"], "expected_fields": ["增长"], "golden_answer": "今日销售额较昨日增长 X%"}

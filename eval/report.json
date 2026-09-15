@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-08-01T11:21:20+00:00",
+  "retrieval": {
+    "count": 10,
+    "recall@k": 0.95,
+    "mrr": 0.9
+  },
+  "customer_service": {
+    "count": 5,
+    "tool_sequence_match": 1.0,
+    "key_fields_covered": 1.0,
+    "citation_precision": 1.0,
+    "citation_presence": 1.0,
+    "correctness": 0.98,
+    "faithfulness": 1.0
+  },
+  "analytics": {
+    "count": 4,
+    "tool_sequence_match": 0.867,
+    "key_fields_covered": 1.0,
+    "correctness": 0.825,
+    "faithfulness": 0.875
+  }
+}
