@@ -1,0 +1,32 @@
+# 版本控制
+.git
+.gitignore
+
+# 本地环境（含密钥，禁止进入镜像）
+.env
+.env.*
+!.env.example
+
+# Python 构建产物
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.coverage
+htmlcov
+
+# 本地数据与日志
+*.log
+data/knowledge_base/*.json
+
+# IDE
+.idea
+.vscode
+
+# 容器/编排自身
+Dockerfile
+.dockerignore
+docker-compose.yml
+monitoring
+docs

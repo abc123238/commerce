@@ -1,0 +1,230 @@
+# ===== 全栈编排（profile 拆分，应对低内存环境）=====
+#
+# 默认栈：api + postgres + qdrant + redis（业务核心）
+# observability profile：langfuse（web/worker + clickhouse + minio），内存充足时启用
+# monitoring profile：prometheus + grafana，可选
+#
+# 所有基础设施端口仅绑定 127.0.0.1，不对外暴露；唯一对外入口 api:8000。
+#
+# 使用：docker compose up -d
+#   （可选）--profile observability / --profile monitoring 追加可观测与监控栈
+# 首次启动后初始化（一次性）：
+#   docker compose exec api alembic upgrade head
+#   docker compose exec api python -m scripts.seed
+#   docker compose exec api python -m scripts.ingest_kb
+services:
+  # ---------- 业务核心栈（默认） ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: commerce-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-commerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-commerce}
+      POSTGRES_DB: ${POSTGRES_DB:-commerce}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-commerce}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: commerce-qdrant
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrantdata:/qdrant/storage
+    healthcheck:
+      # qdrant 镜像无 wget/curl，用 bash /dev/tcp 做端口存活探测
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: commerce-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      args:
+        # 跳过构建期下载 embedding（国内直连 hf.co 极慢易卡死）；
+        # 模型在首次 ingest_kb 时按 .env 的 HF_ENDPOINT 下载并落到持久卷
+        PRE_DOWNLOAD_EMBEDDING: "false"
+    image: ai-commerce-platform:latest
+    container_name: commerce-api
+    env_file: .env
+    environment:
+      # 容器内以服务名互联，覆盖 .env 里的 127.0.0.1
+      POSTGRES_HOST: postgres
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      LANGFUSE_HOST: http://langfuse-web:3000
+      # 模型/缓存统一落到持久卷，容器重建不重下
+      HF_HOME: /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH: /app/.cache/fastembed
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - hf_cache:/app/.cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    restart: unless-stopped
+
+  # ---------- 可观测（observability profile，内存不足可不起） ----------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    container_name: commerce-clickhouse
+    profiles: ["observability"]
+    ports:
+      - "127.0.0.1:8123:8123" # HTTP
+    volumes:
+      - clickhousedata:/var/lib/clickhouse
+      - clickhouselogs:/var/log/clickhouse-server
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  minio:
+    image: minio/minio:latest
+    container_name: commerce-minio
+    profiles: ["observability"]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "127.0.0.1:9090:9000" # S3 API（避免与 9000 段冲突）
+      - "127.0.0.1:9001:9001" # 控制台
+    volumes:
+      - miniodata:/data
+
+  # 一次性初始化：创建 Langfuse 使用的 S3 bucket
+  mc-init:
+    image: minio/mc:latest
+    container_name: commerce-mc-init
+    profiles: ["observability"]
+    depends_on:
+      - minio
+    environment:
+      MINIO_ALIAS: local
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_BUCKET: ${S3_BUCKET_NAME:-langfuse}
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set $$MINIO_ALIAS $$MINIO_ENDPOINT $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY; do sleep 2; done;
+      mc mb --ignore-existing $$MINIO_ALIAS/$$MINIO_BUCKET;
+      exit 0;
+      "
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: commerce-langfuse-web
+    profiles: ["observability"]
+    command: ["web"]
+    environment: &langfuse-env
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change-me-long-random}
+      SALT: ${SALT:-change-me-long-random-salt}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-00000000000000000000000000000000}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-commerce}:${POSTGRES_PASSWORD:-commerce}@postgres:5432/${POSTGRES_DB:-commerce}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:8123/langfuse
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-langfuse}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      clickhouse:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: langfuse/langfuse:3
+    container_name: commerce-langfuse-worker
+    profiles: ["observability"]
+    command: ["worker"]
+    environment: *langfuse-env
+    depends_on:
+      clickhouse:
+        condition: service_started
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  # ---------- 监控（monitoring profile，可选） ----------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: commerce-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: commerce-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  qdrantdata:
+  redisdata:
+  hf_cache:
+  clickhousedata:
+  clickhouselogs:
+  miniodata:
+  promdata:
+  grafanadata:

@@ -1,0 +1,41 @@
+[project]
+name = "ai-commerce-platform"
+version = "0.1.0"
+description = "生产级电商平台 + AI 增强（客服 / 经营分析智能体）"
+requires-python = "==3.12.*"
+dependencies = [
+    "alembic>=1.18.5",
+    "asyncpg>=0.31.0",
+    "bcrypt>=5.0.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.141.1",
+    "fastembed>=0.8.0",
+    "gunicorn>=23.0.0",
+    "jieba>=0.42.1",
+    "langchain>=1.3.14",
+    "langchain-anthropic>=1.5.3",
+    "langchain-core>=1.5.3",
+    "langfuse>=4.14.2",
+    "langgraph>=1.2.10",
+    "prometheus-client>=0.26.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.7",
+    "pyjwt>=2.13.0",
+    "qdrant-client>=1.18.0",
+    "redis>=5",
+    "slowapi>=0.1.10",
+    "sqlalchemy>=2",
+    "sse-starlette>=3.4.6",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.52.0",
+]
+
+[dependency-groups]
+dev = [
+    "fastmcp>=2.14.1",
+    "httpx",
+    "mcp>=1.24.0,<2",
+    "pytest",
+    "pytest-asyncio",
+    "respx",
+]
