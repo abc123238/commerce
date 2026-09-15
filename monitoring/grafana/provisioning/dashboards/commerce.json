@@ -1,0 +1,134 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "HTTP 请求速率（按状态码）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum by (status) (rate(http_requests_total[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP 请求 P50/P90/P99 延迟",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "P50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "P90"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "P99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent 运行次数（按意图）",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (intent) (rate(agent_runs_total[5m]))",
+          "legendFormat": "{{intent}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "混合检索次数",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        {
+          "expr": "rate(retrievals_total[5m])",
+          "legendFormat": "检索"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "工具调用次数（按工具）",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum by (tool) (rate(tool_calls_total[5m]))",
+          "legendFormat": "{{tool}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "被限流拒绝的请求（5 分钟累计）",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "sum(increase(rate_limited_total[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["ai-commerce-platform"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "AI 电商平台监控",
+  "uid": "commerce-overview",
+  "version": 1
+}

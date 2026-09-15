@@ -1,0 +1,12 @@
+# Grafana 仪表盘自动加载：把监控目录下的 JSON 仪表盘注册到 Prometheus 数据源
+apiVersion: 1
+
+providers:
+  - name: commerce
+    orgId: 1
+    folder: AI Commerce Platform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
