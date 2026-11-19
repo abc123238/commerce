@@ -2,7 +2,7 @@
 
 一个以**完整业务系统为主体、AI 智能体为核心功能模块**的全栈项目：电商业务闭环（鉴权 / 商品 / 购物车 / 订单 / 模拟支付）之上，叠加两个 AI 增强能力——**AI 客服**（RAG + 工具调用打穿真实业务库）与**经营分析智能体**（多步工具调用出报表），并配齐 Docker 部署、Langfuse 可观测链路、Prometheus 监控、评测流水线与限流安全。
 
-> 面向「AI 应用开发」岗位（实习 + 校招）：一套代码同时证明**工程基本功**（后端全链路）与**用 AI 解决真实问题**的能力。
+> 设计目标：业务闭环、AI 能力与工程化并重——可运行、可观测、可评测。
 
 ---
 
@@ -106,7 +106,7 @@ ai-commerce-platform/
 ├── eval/                  # runner(CLI) / engine / datasets / judge / usage / report / thresholds.json + 四数据集
 ├── scripts/               # seed / ingest_kb / smoke / verify_flow / verify_order_flow
 ├── data/knowledge_base/   # 客服 RAG 语料
-├── docs/                  # architecture / observability / eval / interview_prep
+├── docs/                  # architecture / observability / eval / design_decisions
 ├── examples/              # mcp_demo_server.py（MCP 演示）
 ├── monitoring/            # prometheus.yml + grafana provisioning
 ├── frontend/              # Vue 3 前端（vite build 产物 → app/static）
@@ -231,7 +231,7 @@ curl -N 127.0.0.1:8000/api/v1/analytics \
 
 ---
 
-## 可观测性（简历重点）
+## 可观测性
 
 ```
 HTTP 请求 ──▶ 中间件生成 trace_id（X-Trace-ID 回传）
@@ -291,7 +291,7 @@ python -m eval.runner --dataset customer_service --tag order_write --limit 3
 
 ---
 
-## 面试话术速记
+## 关键设计取舍
 
 1. **为什么单 Agent 而不是多 Agent？** 客服与经营分析共享同一张图，仅按意图分流工具集与是否检索——复杂度可控、可观测链路简单，多 Agent 带来的编排成本对当前需求是负收益。
 2. **可观测怎么做？** HTTP 中间件生成 trace_id（ContextVar + `X-Trace-ID`），Langfuse 回调自动把 graph 每步拉成嵌套 span，structlog 打 trace_id 维度日志，Prometheus 聚合指标；Langfuse 可插拔，挂了不影响主链路。
