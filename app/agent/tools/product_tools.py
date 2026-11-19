@@ -17,6 +17,9 @@ def build_product_tools(db: AsyncSession) -> list:
     async def query_product(name: str) -> str:
         """按名称模糊查询商品实时价格与库存。
 
+        返回文本带商品 ID（形如「ID=3」）：下单时必须原样使用该 ID，
+        禁止猜测或编造商品 ID。
+
         Args:
             name: 商品名称关键词，如“蓝牙耳机”
         """
@@ -31,7 +34,7 @@ def build_product_tools(db: AsyncSession) -> list:
         if not products:
             return f"未找到名称包含「{name}」的商品"
         return "\n".join(
-            f"商品 {p.name}：价格={p.price} 元，库存={p.stock}，"
+            f"商品 {p.name}（ID={p.id}）：价格={p.price} 元，库存={p.stock}，"
             f"状态={'在售' if p.status == 'on' else '下架'}"
             for p in products
         )

@@ -1,6 +1,7 @@
 """订单 / 订单项 / 支付模型。
 
-订单状态机：created -> paid -> completed；created <-> cancelled。
+订单状态机：created -> paid -> shipped -> completed；created -> cancelled。
+shipped/completed 由模拟物流惰性推进（见 app/services/logistics_service.py）。
 支付为模拟实现（不接真实支付渠道）。
 """
 from datetime import datetime
@@ -15,8 +16,23 @@ from app.db.base import Base
 class OrderStatus:
     CREATED = "created"
     PAID = "paid"
+    SHIPPED = "shipped"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+
+# 状态下 → 中文展示名，集中一处避免工具/接口各自硬编码
+STATUS_CN: dict[str, str] = {
+    OrderStatus.CREATED: "待支付",
+    OrderStatus.PAID: "已支付",
+    OrderStatus.SHIPPED: "已发货",
+    OrderStatus.COMPLETED: "已完成",
+    OrderStatus.CANCELLED: "已取消",
+}
+
+
+def status_cn(status: str) -> str:
+    return STATUS_CN.get(status, status)
 
 
 class Order(Base):
@@ -31,7 +47,11 @@ class Order(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 模拟物流的运单信息：由 order_no 确定性生成（非随机），发货时写入
+    tracking_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    carrier: Mapped[str | None] = mapped_column(String(50), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     items: Mapped[list["OrderItem"]] = relationship(

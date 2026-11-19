@@ -1,10 +1,22 @@
-{"question": "无线蓝牙耳机降噪效果怎么样", "golden_doc_ids": ["products:无线蓝牙耳机", "products:降噪与音质"]}
-{"question": "机械键盘支持哪些灯效", "golden_doc_ids": ["products:机械键盘", "products:灯效与自定义"]}
-{"question": "七天无理由退换怎么申请", "golden_doc_ids": ["returns:七天无理由退换"]}
-{"question": "订单一般几天能送到", "golden_doc_ids": ["shipping:配送时效", "shipping:发货流程"]}
-{"question": "支持哪些支付方式", "golden_doc_ids": ["payment:支持方式"]}
-{"question": "如何查询订单状态", "golden_doc_ids": ["faq:如何查询订单状态"]}
-{"question": "智能手表能测血氧吗", "golden_doc_ids": ["products:智能手表", "products:健康监测"]}
-{"question": "充电宝能带上飞机吗", "golden_doc_ids": ["products:便携充电宝", "products:充电安全"]}
-{"question": "退货运费谁承担", "golden_doc_ids": ["returns:七天无理由退换", "returns:特别说明"]}
-{"question": "忘记密码怎么办", "golden_doc_ids": ["faq:忘记密码怎么办"]}
+{"id": "retrieval-01", "tag": "product", "difficulty": "easy", "enabled": true, "question": "无线蓝牙耳机降噪效果怎么样", "golden_doc_ids": ["products:无线蓝牙耳机", "products:降噪与音质"]}
+{"id": "retrieval-02", "tag": "product", "difficulty": "easy", "enabled": true, "question": "机械键盘支持哪些灯效", "golden_doc_ids": ["products:机械键盘", "products:灯效与自定义"]}
+{"id": "retrieval-03", "tag": "returns", "difficulty": "easy", "enabled": true, "question": "七天无理由退换怎么申请", "golden_doc_ids": ["returns:七天无理由退换"]}
+{"id": "retrieval-04", "tag": "shipping", "difficulty": "easy", "enabled": true, "question": "订单一般几天能送到", "golden_doc_ids": ["shipping:配送时效", "shipping:发货流程"]}
+{"id": "retrieval-05", "tag": "payment", "difficulty": "easy", "enabled": true, "question": "支持哪些支付方式", "golden_doc_ids": ["payment:支持方式"]}
+{"id": "retrieval-06", "tag": "faq", "difficulty": "easy", "enabled": true, "question": "如何查询订单状态", "golden_doc_ids": ["faq:如何查询订单状态"]}
+{"id": "retrieval-07", "tag": "product", "difficulty": "easy", "enabled": true, "question": "智能手表能测血氧吗", "golden_doc_ids": ["products:智能手表", "products:健康监测"]}
+{"id": "retrieval-08", "tag": "product", "difficulty": "easy", "enabled": true, "question": "充电宝能带上飞机吗", "golden_doc_ids": ["products:便携充电宝", "products:充电安全"]}
+{"id": "retrieval-09", "tag": "returns", "difficulty": "medium", "enabled": true, "question": "退货运费谁承担", "golden_doc_ids": ["returns:七天无理由退换", "returns:特别说明"]}
+{"id": "retrieval-10", "tag": "faq", "difficulty": "easy", "enabled": true, "question": "忘记密码怎么办", "golden_doc_ids": ["faq:忘记密码怎么办"]}
+{"id": "retrieval-11", "tag": "product", "difficulty": "medium", "enabled": true, "question": "耳机防水吗，能戴着运动吗", "golden_doc_ids": ["products:无线蓝牙耳机", "products:防水与续航"]}
+{"id": "retrieval-12", "tag": "product", "difficulty": "medium", "enabled": true, "question": "机械键盘续航多久", "golden_doc_ids": ["products:机械键盘", "products:灯效与自定义"]}
+{"id": "retrieval-13", "tag": "product", "difficulty": "easy", "enabled": true, "question": "智能手表支持哪些运动模式", "golden_doc_ids": ["products:智能手表"]}
+{"id": "retrieval-14", "tag": "product", "difficulty": "easy", "enabled": true, "question": "充电宝可以同时给几台设备充电", "golden_doc_ids": ["products:便携充电宝"]}
+{"id": "retrieval-15", "tag": "shipping", "difficulty": "medium", "enabled": true, "question": "满 99 元包邮吗", "golden_doc_ids": ["shipping:配送时效", "faq:优惠与满减"]}
+{"id": "retrieval-16", "tag": "payment", "difficulty": "medium", "enabled": true, "question": "发票怎么开", "golden_doc_ids": ["payment:发票说明"]}
+{"id": "retrieval-17", "tag": "shipping", "difficulty": "medium", "enabled": true, "question": "支付后什么时候发货", "golden_doc_ids": ["shipping:发货流程"]}
+{"id": "retrieval-18", "tag": "returns", "difficulty": "medium", "enabled": true, "question": "退款多久到账", "golden_doc_ids": ["returns:退款时效"]}
+{"id": "retrieval-19", "tag": "multi_turn", "difficulty": "medium", "enabled": true, "question": "它降噪效果怎么样", "history": [{"role": "user", "content": "无线蓝牙耳机有什么特点"}, {"role": "assistant", "content": "无线蓝牙耳机支持主动降噪、蓝牙 5.3，单次续航 8 小时，价格 399 元。"}], "golden_doc_ids": ["products:无线蓝牙耳机", "products:降噪与音质"]}
+{"id": "retrieval-20", "tag": "multi_turn", "difficulty": "medium", "enabled": true, "question": "能带上飞机吗", "history": [{"role": "user", "content": "便携充电宝容量多大"}, {"role": "assistant", "content": "便携充电宝容量 20000mAh，支持 22.5W 双向快充，价格 159 元。"}], "golden_doc_ids": ["products:便携充电宝", "products:充电安全"]}
+{"id": "retrieval-21", "tag": "multi_turn", "difficulty": "medium", "enabled": true, "question": "那它能戴着游泳吗", "history": [{"role": "user", "content": "智能手表能测血氧吗"}, {"role": "assistant", "content": "智能手表支持血氧、心率与睡眠监测，价格 1299 元。"}], "golden_doc_ids": ["products:智能手表"]}
+{"id": "retrieval-22", "tag": "multi_turn", "difficulty": "medium", "enabled": true, "question": "这个能戴着运动吗", "history": [{"role": "user", "content": "无线蓝牙耳机多少钱"}, {"role": "assistant", "content": "无线蓝牙耳机售价 399 元。"}], "golden_doc_ids": ["products:无线蓝牙耳机", "products:防水与续航"]}

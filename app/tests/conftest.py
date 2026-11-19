@@ -9,12 +9,28 @@ import asyncio
 import asyncpg
 import httpx
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.db import models  # noqa: F401  确保全部模型注册进 Base.metadata
 from app.db.base import Base
+from app.db.models import (
+    Cart,
+    CartItem,
+    Category,
+    DailyCategorySalesAgg,
+    DailySalesAgg,
+    EvalCaseResult,
+    EvalRun,
+    Order,
+    OrderItem,
+    OrderStatusEvent,
+    Payment,
+    Product,
+    User,
+)
 from app.db.session import get_db
 from app.main import app
 
@@ -84,6 +100,35 @@ async def db_session():
     """测试内直接读写业务库的会话。"""
     async with _session_factory() as session:
         yield session
+
+
+@pytest.fixture
+def session_factory():
+    """测试库会话工厂：用于给自建会话的服务（如 eval_service）打补丁。"""
+    return _session_factory
+
+
+@pytest.fixture
+async def clean_db(db_session):
+    """按外键依赖顺序清空所有表，供集成测试构造确定数据。"""
+    for model in (
+        EvalCaseResult,
+        EvalRun,
+        OrderStatusEvent,
+        DailyCategorySalesAgg,
+        DailySalesAgg,
+        Payment,
+        OrderItem,
+        Order,
+        CartItem,
+        Cart,
+        Product,
+        Category,
+        User,
+    ):
+        await db_session.execute(delete(model))
+    await db_session.commit()
+    return db_session
 
 
 @pytest.fixture

@@ -12,6 +12,7 @@ from langchain_core.messages import (
 
 from app.agent.intent import classify_intent
 from app.agent.prompts import ANALYTICS_PROMPT, SYSTEM_PROMPT, build_question_prompt
+from app.agent.query_rewrite import rewrite_query
 from app.agent.tools.registry import ToolRegistry
 from app.core.logging import get_logger
 from app.observability.metrics import RETRIEVALS, TOOL_CALLS
@@ -45,10 +46,30 @@ def make_route_node():
     return route_node
 
 
+def make_rewrite_node():
+    async def rewrite_node(state: dict) -> dict:
+        question = state.get("question", "")
+        result = await rewrite_query(question, state.get("history", []))
+        if result.error:
+            detail = f"查询改写失败（{result.error}），使用原问题"
+        elif result.query != question:
+            detail = f"查询改写：{question[:40]} → {result.query[:60]}"
+        else:
+            detail = "查询改写：保持原问题"
+        return {
+            "rewritten_query": result.query,
+            "steps": [{"node": "rewrite", "detail": detail}],
+        }
+
+    return rewrite_node
+
+
 def make_retrieve_node():
     async def retrieve_node(state: dict) -> dict:
         question = state.get("question", "")
-        hits = await hybrid_search(question)
+        # 改写失败时 rewritten_query 已回退为原问题；直接调用节点的场景也能工作。
+        query = state.get("rewritten_query") or question
+        hits = await hybrid_search(query)
         RETRIEVALS.inc()
         retrieved = [
             {"text": h.text, "source": h.source, "title": h.title} for h in hits
@@ -111,6 +132,7 @@ def make_execute_tool_node(registry: ToolRegistry):
         results = []
         names: list[str] = []
         processed: list[str] = []
+        events: list[dict] = []
         for call in last.tool_calls:
             name, args = call["name"], call.get("args", {})
             sig = _signature(name, args)
@@ -125,6 +147,7 @@ def make_execute_tool_node(registry: ToolRegistry):
                 )
                 processed.append(sig)
                 names.append(f"{name}(已执行)")
+                events.append({"name": name, "args": args, "status": "skipped"})
                 continue
             TOOL_CALLS.labels(tool=name).inc()
             result = await registry.execute(name, args)
@@ -133,6 +156,14 @@ def make_execute_tool_node(registry: ToolRegistry):
             )
             processed.append(sig)
             names.append(name)
+            events.append(
+                {
+                    "name": name,
+                    "args": args,
+                    "status": "executed",
+                    "result_preview": result[:200],
+                }
+            )
             logger.info(
                 "tool_call",
                 run_id=state.get("run_id", ""),
@@ -143,6 +174,7 @@ def make_execute_tool_node(registry: ToolRegistry):
         return {
             "messages": results,
             "executed_tools": processed,
+            "tool_events": events,
             "steps": [{"node": "execute_tool", "detail": f"执行 {len(results)} 个工具：{', '.join(names)}"}],
         }
 

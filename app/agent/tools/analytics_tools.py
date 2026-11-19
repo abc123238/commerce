@@ -1,30 +1,19 @@
 """经营分析工具：读真实订单数据做聚合、环比计算与畅销榜。
 
-只统计已支付订单（Order.status == paid），金额为 单价×数量 汇总。
-与客服工具同款闭包注入 db，确保在请求会话内查询。
+业务口径与聚合 SQL 统一收敛到 app/services/analytics_service.py，
+工具只负责参数解析与中文文本格式化，避免 API 与 Agent 各有一套口径。
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from langchain_core.tools import tool
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.order import Order, OrderItem, OrderStatus
-from app.db.models.product import Category, Product
-
-_REVENUE = OrderItem.unit_price * OrderItem.quantity
+from app.services import analytics_service
 
 
 def _money(v) -> str:
     return f"¥{Decimal(v):.2f}"
-
-
-def _parse_day(s: str) -> date:
-    try:
-        return date.fromisoformat(s)
-    except ValueError:
-        raise ValueError(f"日期格式应为 YYYY-MM-DD，收到：{s}")
 
 
 def build_analytics_tools(db: AsyncSession) -> list:
@@ -42,58 +31,27 @@ def build_analytics_tools(db: AsyncSession) -> list:
         参数：start_date / end_date 为 YYYY-MM-DD（含边界，闭区间）；
         缺省时默认取最近 7 天（含今天）；group_by 取值 day（默认，按天）或 category（按品类）。
         """
-        today = datetime.now(timezone.utc).date()
-        start = _parse_day(start_date) if start_date else today - timedelta(days=6)
-        end = _parse_day(end_date) if end_date else today
-
-        def _base(stmt):
-            return (
-                stmt.select_from(OrderItem)
-                .join(Order, Order.id == OrderItem.order_id)
-                .where(
-                    Order.status == OrderStatus.PAID,
-                    func.date(Order.paid_at) >= start,
-                    func.date(Order.paid_at) <= end,
-                )
-            )
+        start, end = analytics_service.default_range()
+        if start_date:
+            start = analytics_service.parse_day(start_date)
+        if end_date:
+            end = analytics_service.parse_day(end_date)
 
         if group_by == "category":
-            rows = (
-                await db.execute(
-                    _base(
-                        select(
-                            Category.name,
-                            func.sum(_REVENUE),
-                            func.count(func.distinct(Order.id)),
-                        )
-                    )
-                    .join(Product, Product.id == OrderItem.product_id)
-                    .join(Category, Category.id == Product.category_id)
-                    .group_by(Category.name)
-                )
-            ).all()
+            rows = await analytics_service.sales_by_category(db, start, end)
             if not rows:
                 return f"{start} ~ {end} 区间无已支付订单数据"
             return "\n".join(
-                f"{name}：销售额 {_money(s)}，{cnt} 单" for name, s, cnt in rows
+                f"{row.name}：销售额 {_money(row.revenue)}，{row.orders} 单"
+                for row in rows
             )
 
-        rows = (
-            await db.execute(
-                _base(
-                    select(
-                        func.date(Order.paid_at),
-                        func.sum(_REVENUE),
-                        func.count(func.distinct(Order.id)),
-                    )
-                )
-                .group_by(func.date(Order.paid_at))
-                .order_by(func.date(Order.paid_at))
-            )
-        ).all()
+        rows = await analytics_service.sales_by_day(db, start, end)
         if not rows:
             return f"{start} ~ {end} 区间无已支付订单数据"
-        return "\n".join(f"{d}：销售额 {_money(s)}，{cnt} 单" for d, s, cnt in rows)
+        return "\n".join(
+            f"{row.day}：销售额 {_money(row.revenue)}，{row.orders} 单" for row in rows
+        )
 
     @tool
     async def calc_growth(base_value: str, current_value: str) -> str:
@@ -105,28 +63,21 @@ def build_analytics_tools(db: AsyncSession) -> list:
             base, current = Decimal(base_value), Decimal(current_value)
         except Exception:
             return "数值解析失败，请传入数字字符串"
-        if base == 0:
+        rate = analytics_service.growth_rate(base, current)
+        if rate is None:
             return "基准值为 0，无法计算增长率"
-        rate = (current - base) / base * 100
         return f"增长率 {rate:+.1f}%（基准 {_money(base)} → 当前 {_money(current)}）"
 
     @tool
     async def top_products(limit: int = 5) -> str:
         """按销售额返回畅销商品 Top N（仅统计已支付订单）。"""
-        rows = (
-            await db.execute(
-                select(Product.name, func.sum(_REVENUE))
-                .join(OrderItem, OrderItem.product_id == Product.id)
-                .join(Order, Order.id == OrderItem.order_id)
-                .where(Order.status == OrderStatus.PAID)
-                .group_by(Product.name)
-                .order_by(func.sum(_REVENUE).desc())
-                .limit(max(1, min(limit, 20)))
-            )
-        ).all()
+        rows = await analytics_service.top_products(db, limit=limit)
         if not rows:
             return "暂无已支付订单数据"
-        lines = [f"{i + 1}. {name}：{_money(s)}" for i, (name, s) in enumerate(rows)]
+        lines = [
+            f"{i + 1}. {row.name}：{_money(row.revenue)}"
+            for i, row in enumerate(rows)
+        ]
         return "畅销榜（按销售额）：\n" + "\n".join(lines)
 
     return [current_date, query_sales_summary, calc_growth, top_products]

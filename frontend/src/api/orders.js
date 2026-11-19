@@ -19,3 +19,7 @@ export function payOrder(orderNo) {
 export function cancelOrder(orderNo) {
   return api.post(`/orders/${orderNo}/cancel`)
 }
+
+export function getTracking(orderNo) {
+  return api.get(`/orders/${orderNo}/tracking`)
+}

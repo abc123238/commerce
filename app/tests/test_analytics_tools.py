@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.agent.tools.analytics_tools import build_analytics_tools
 from app.core.security import hash_password
@@ -14,9 +14,14 @@ from app.db.models import (
     Cart,
     CartItem,
     Category,
+    DailyCategorySalesAgg,
+    DailySalesAgg,
+    EvalCaseResult,
+    EvalRun,
     Order,
     OrderItem,
     OrderStatus,
+    OrderStatusEvent,
     Payment,
     Product,
     User,
@@ -28,7 +33,21 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 async def clean_db(db_session):
     # 按外键依赖顺序清理：支付->订单项->订单->购物车项->购物车->商品->分类->用户
-    for model in (Payment, OrderItem, Order, CartItem, Cart, Product, Category, User):
+    for model in (
+        EvalCaseResult,
+        EvalRun,
+        OrderStatusEvent,
+        DailyCategorySalesAgg,
+        DailySalesAgg,
+        Payment,
+        OrderItem,
+        Order,
+        CartItem,
+        Cart,
+        Product,
+        Category,
+        User,
+    ):
         await db_session.execute(delete(model))
     await db_session.commit()
     return db_session
@@ -114,3 +133,42 @@ async def test_top_products_ordered_by_revenue(clean_db):
     r = await tools["top_products"].ainvoke({"limit": 5})
     assert p1.name in r and p2.name in r
     assert r.index(p1.name) < r.index(p2.name)  # A 销售额更高，应排更前
+
+
+async def test_shipped_and_completed_orders_still_counted(clean_db):
+    """回归守门：订单状态会随模拟物流推进到 shipped / completed。
+
+    营收统计必须以 paid_at 判断「已支付」，若用 status == paid 过滤，
+    这些订单会被静默漏统计——而用旧判据的测试数据全是 status=paid，一个都不会红。
+    """
+    _, p1, _ = await _seed(clean_db)
+    user = await clean_db.scalar(select(User).limit(1))
+    now = datetime.now(timezone.utc)
+    shipped = Order(
+        order_no=f"ORD{uuid4().hex[:12].upper()}", user_id=user.id, total=100,
+        status=OrderStatus.SHIPPED, paid_at=now, shipped_at=now,
+        tracking_no="SF000000000001", carrier="顺丰速运（模拟）",
+    )
+    completed = Order(
+        order_no=f"ORD{uuid4().hex[:12].upper()}", user_id=user.id, total=100,
+        status=OrderStatus.COMPLETED, paid_at=now, shipped_at=now, completed_at=now,
+    )
+    clean_db.add_all([shipped, completed])
+    await clean_db.flush()
+    clean_db.add_all(
+        [
+            OrderItem(order_id=shipped.id, product_id=p1.id, product_name=p1.name, quantity=1, unit_price="100.00"),
+            OrderItem(order_id=completed.id, product_id=p1.id, product_name=p1.name, quantity=1, unit_price="100.00"),
+        ]
+    )
+    await clean_db.commit()
+
+    tools = _tools(clean_db)
+    today = now.date().isoformat()
+    summary = await tools["query_sales_summary"].ainvoke(
+        {"start_date": today, "end_date": today, "group_by": "day"}
+    )
+    assert "¥450.00" in summary and "4 单" in summary  # 250 + 100 + 100
+
+    top = await tools["top_products"].ainvoke({"limit": 5})
+    assert "¥400.00" in top  # p1：200 + 100 + 100

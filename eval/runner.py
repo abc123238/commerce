@@ -1,162 +1,131 @@
-"""评测主入口：跑三套数据集 -> 聚合指标 -> 写 report.json / report.md。
+"""评测主入口：跑数据集 -> 聚合指标 -> 写 report.json / report.md（可选入库与门禁）。
 
-用法：uv run python -m eval.runner
-前置：已启动依赖服务（Postgres/Qdrant/Redis）并完成 seed + 知识库入库
-（uv run python -m scripts.seed && uv run python -m scripts.ingest_kb）。
+用法（需已启动依赖服务并完成 seed + 知识库入库）：
+    python -m eval.runner [--dataset all|retrieval|customer_service|analytics|robustness]
+        [--tag TAG ...] [--difficulty easy|medium|hard] [--limit N]
+        [--no-judge] [--no-persist] [--gate]
+        [--gate-config eval/thresholds.json]
+        [--json-out PATH] [--md-out PATH]
+
+退出码：0 成功；1 执行失败；2 门禁未通过。
 """
+import argparse
 import asyncio
 import json
-from datetime import datetime, timezone
+from pathlib import Path
 
-from sqlalchemy import select
-
-from app.agent.graph import run_agent
 from app.core.logging import get_logger
-from app.db.models.user import User
-from app.db.session import SessionLocal
-from app.rag.vectorstore import hybrid_search
-from eval import config
-from eval.metrics.answer import judge_metrics
-from eval.metrics.citation import citation_presence, citation_precision
-from eval.metrics.retrieval import mrr, recall_at_k
-from eval.metrics.task import key_fields_covered, tool_sequence_match
+from eval import config, datasets, engine
 from eval.report import build_markdown
 
 logger = get_logger("eval")
 
-_AGENT_METRIC_KEYS = ("tool_sequence_match", "key_fields_covered")
-_CITATION_KEYS = ("citation_precision", "citation_presence")
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m eval.runner", description="运行 RAG / Agent 评测"
+    )
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        choices=[*datasets.DATASETS, "all"],
+        default=None,
+        help="可重复指定；缺省/包含 all 时跑全部数据集",
+    )
+    parser.add_argument("--tag", action="append", default=None, help="按标签过滤（可重复）")
+    parser.add_argument("--difficulty", choices=["easy", "medium", "hard"])
+    parser.add_argument("--limit", type=int, default=None, help="每个数据集最多跑 N 条")
+    parser.add_argument("--no-judge", action="store_true", help="关闭 LLM-as-judge")
+    parser.add_argument("--no-persist", action="store_true", help="不写入数据库")
+    parser.add_argument("--gate", action="store_true", help="按阈值判定门禁")
+    parser.add_argument(
+        "--gate-config", type=Path, default=config.GATE_CONFIG, help="门禁阈值 JSON"
+    )
+    parser.add_argument("--json-out", type=Path, default=config.REPORT_JSON)
+    parser.add_argument("--md-out", type=Path, default=config.REPORT_MD)
+    return parser
 
 
-def _zero_metrics(include_citation: bool) -> dict:
-    """失败兜底：全 0 分。引用指标只在 RAG 类数据集上统计。"""
-    keys = list(_AGENT_METRIC_KEYS) + (list(_CITATION_KEYS) if include_citation else [])
-    return {k: 0.0 for k in keys}
+def _options_from_args(args: argparse.Namespace) -> engine.EvalOptions:
+    names = args.dataset or ["all"]
+    if "all" in names:
+        names = list(datasets.DATASETS)
+    return engine.EvalOptions(
+        datasets=names,
+        tags=args.tag or [],
+        difficulty=args.difficulty,
+        limit=args.limit,
+        judge=config.ENABLE_LLM_JUDGE and not args.no_judge,
+        top_k=config.RETRIEVAL_TOP_K,
+    )
 
 
-def _load_dataset(name: str) -> list[dict]:
-    path = config.DATASETS_DIR / f"{name}.jsonl"
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def _write_outputs(report: dict, json_path: Path, md_path: Path) -> None:
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    md_path.write_text(build_markdown(report), encoding="utf-8")
 
 
-async def _run_retrieval_case(case: dict) -> dict:
-    hits = await hybrid_search(case["question"], top_k=config.RETRIEVAL_TOP_K)
-    ids = [h.doc_id for h in hits]
-    return {
-        "recall@k": recall_at_k(ids, case.get("golden_doc_ids", [])),
-        "mrr": mrr(ids, case.get("golden_doc_ids", [])),
-    }
+async def _execute(
+    options: engine.EvalOptions,
+    *,
+    persist: bool,
+    gate_thresholds: dict | None = None,
+) -> tuple[dict, str | None]:
+    if persist:
+        from app.services import eval_service
+
+        row, report = await eval_service.run_eval_now(
+            options, triggered_by="cli", gate_thresholds=gate_thresholds
+        )
+        return report, row.run_id
+    report = await engine.run_datasets(options)
+    if gate_thresholds is not None:
+        report["gate"] = engine.evaluate_gate(report, gate_thresholds)
+    return report, None
 
 
-def _extract_tools(steps: list[dict]) -> list[str]:
-    """从 step 审计中还原实际执行的工具名（detail 形如「执行 2 个工具：a, b」）。"""
-    names: list[str] = []
-    for s in steps:
-        detail = s.get("detail", "")
-        if s.get("node") == "execute_tool" and detail.startswith("执行") and "：" in detail:
-            names.extend(n.strip() for n in detail.split("：", 1)[1].split(",") if n.strip())
-    return names
-
-
-async def _run_agent_case(
-    db, user_id: int, case: dict, include_citation: bool, user_role: str | None = None
-) -> dict:
-    result = await run_agent(db, user_id, case["question"], user_role=user_role)
-    answer = result.get("answer", "")
-    metrics = {
-        "tool_sequence_match": tool_sequence_match(
-            _extract_tools(result.get("steps", [])), case.get("expected_tools", [])
-        ),
-        "key_fields_covered": key_fields_covered(answer, case.get("expected_fields", [])),
-    }
-    if include_citation:
-        metrics["citation_precision"] = citation_precision(answer, len(result.get("retrieved", [])))
-        metrics["citation_presence"] = citation_presence(answer, case.get("requires_citation", False))
-    if config.ENABLE_LLM_JUDGE:
-        judge = await judge_metrics(case["question"], answer, case.get("golden_answer"))
-        metrics.update({"correctness": judge["correctness"], "faithfulness": judge["faithfulness"]})
-    return metrics
-
-
-def _aggregate(metrics: list[dict]) -> dict:
-    if not metrics:
-        return {"count": 0}
-    agg = {"count": len(metrics)}
-    for key in metrics[0]:
-        agg[key] = round(sum(m[key] for m in metrics) / len(metrics), 3)
-    return agg
-
-
-async def _run_retrieval() -> dict:
-    cases = _load_dataset("retrieval")
-    return _aggregate([await _run_retrieval_case(c) for c in cases])
-
-
-async def _run_agent_dataset(db, user_id: int, name: str) -> dict:
-    cases = _load_dataset(name)[: config.MAX_AGENT_CASES]
-    include_citation = name == "customer_service"
-    # 经营分析数据集需要管理员角色，否则 build_agent 会回退到客服工具集
-    user_role = "admin" if name == "analytics" else "customer"
-    metrics = []
-    for case in cases:
-        try:
-            metrics.append(
-                await _run_agent_case(db, user_id, case, include_citation, user_role=user_role)
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("eval_case_fail", dataset=name, question=case["question"][:50], exc=str(exc)[:150])
-            metrics.append(_zero_metrics(include_citation))
-    return _aggregate(metrics)
-
-
-async def _write_back_langfuse(report: dict) -> None:
-    """把聚合评测分回写 Langfuse（按 trace 打标）。可插拔：未部署时跳过。"""
-    if not config.WRITE_BACK_LANGFUSE or not report:
-        return
-    try:
-        from langfuse import Langfuse
-
-        client = Langfuse()
-        for dataset, section in (("retrieval", report["retrieval"]), ("customer_service", report["customer_service"]), ("analytics", report["analytics"])):
-            if not section.get("count"):
-                continue
-            for metric, value in section.items():
-                if metric == "count":
-                    continue
-                client.score(
-                    name=f"eval:{dataset}:{metric}",
-                    value=value,
-                    comment=f"{dataset} 数据集聚合指标",
-                )
-        client.flush()
-        logger.info("langfuse_writeback_ok")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("langfuse_writeback_skip", exc=str(exc)[:120])
-
-
-async def run() -> dict:
-    """执行全部评测并落盘 report.json / report.md，返回报告字典。"""
-    retrieval = await _run_retrieval()
-
-    async with SessionLocal() as db:
-        user = await db.scalar(select(User).where(User.email == "demo@example.com"))
-        if user is None:
-            logger.error("demo_user_missing", hint="请先运行 uv run python -m scripts.seed")
-            return {}
-        customer_service = await _run_agent_dataset(db, user.id, "customer_service")
-        analytics = await _run_agent_dataset(db, user.id, "analytics")
-
-    report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "retrieval": retrieval,
-        "customer_service": customer_service,
-        "analytics": analytics,
-    }
-    config.REPORT_JSON.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    config.REPORT_MD.write_text(build_markdown(report), encoding="utf-8")
+async def run(options: engine.EvalOptions | None = None) -> dict:
+    """向后兼容的脚本入口：执行评测、写 report 文件，不入库。"""
+    report, _ = await _execute(options or engine.EvalOptions(), persist=False)
+    _write_outputs(report, config.REPORT_JSON, config.REPORT_MD)
     logger.info("eval_done", report=config.REPORT_MD.name)
-    return report
+
+
+
+
+async def amain(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    options = _options_from_args(args)
+    gate_thresholds = (
+        engine.load_thresholds(args.gate_config) if args.gate else None
+    )
+
+    try:
+        report, run_id = await _execute(
+            options, persist=not args.no_persist, gate_thresholds=gate_thresholds
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("eval_run_failed", exc=str(exc)[:300])
+        return 1
+
+    _write_outputs(report, args.json_out, args.md_out)
+    if run_id:
+        logger.info("eval_persisted", run_id=run_id)
+
+    gate = report.get("gate")
+    if gate is not None and not gate.get("passed", False):
+        failures = [c["name"] for c in gate.get("checks", []) if not c["ok"]]
+        logger.error("eval_gate_failed", failures=", ".join(failures))
+        return 2
+    return 0
+
+
+def main() -> None:
+    raise SystemExit(asyncio.run(amain()))
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    main()

@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # ---- Redis ----
     redis_url: str = "redis://127.0.0.1:6379/0"
 
+    # ---- 交易 / 模拟物流 ----
+    # Agent 待确认下单快照的存活时间（秒）：超时后 confirm_order 必然失败
+    agent_pending_order_ttl_seconds: int = 300
+    # 模拟物流每阶段间隔（秒）：0 已支付 1 揽收 2 运输 3 分拨 4 派送 5 签收
+    logistics_stage_seconds: int = 120
+
     # ---- LLM ----
     anthropic_base_url: str | None = None
     anthropic_auth_token: str | None = None
@@ -52,6 +58,11 @@ class Settings(BaseSettings):
     embedding_model: str = "jinaai/jina-embeddings-v2-base-zh"
     rag_top_k: int = 6
     rag_collection: str = "knowledge_base"
+    # 检索前用 LLM 结合对话历史改写 query，消除多轮指代与省略
+    rag_query_rewrite_enabled: bool = True
+    # 改写单独限时：失败就降级用原问题，不能拖到主 LLM 的 60s 超时
+    rag_rewrite_timeout_seconds: float = 8.0
+    rag_rewrite_history_turns: int = 4
     # HuggingFace 下载镜像（国内网络不可直连 hf.co 时的适配项）
     hf_endpoint: str | None = None
     hf_disable_xet: bool = False
@@ -65,6 +76,10 @@ class Settings(BaseSettings):
     # ---- 限流（次/分钟/键）----
     rate_limit_public: int = 100
     rate_limit_chat: int = 20
+
+    # ---- 评测 ----
+    # pending/running 超过该时长未更新心跳，视为进程重启/超时，由 reaper 释放槽位
+    eval_run_stale_minutes: int = 30
 
     @model_validator(mode="after")
     def _guard_prod_debug(self) -> "Settings":

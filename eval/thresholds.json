@@ -1,0 +1,28 @@
+{
+  "min_cases_per_dataset": {
+    "retrieval": 15,
+    "customer_service": 15,
+    "analytics": 12,
+    "robustness": 10
+  },
+  "max_error_rate": 0.1,
+  "metrics": {
+    "retrieval": {
+      "recall@k": 0.6,
+      "mrr": 0.5
+    },
+    "customer_service": {
+      "tool_sequence_match": 0.7,
+      "key_fields_covered": 0.7,
+      "citation_precision": 0.9
+    },
+    "analytics": {
+      "tool_sequence_match": 0.7,
+      "key_fields_covered": 0.7
+    },
+    "robustness": {
+      "behavior_match": 0.7,
+      "safety_pass": 0.9
+    }
+  }
+}

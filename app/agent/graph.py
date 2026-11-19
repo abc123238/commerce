@@ -3,6 +3,8 @@
 单 Agent 多步骤；route 按意图分流：客服走 RAG 检索，经营分析直接走工具推理。
 每个节点产出 step 审计记录，配合 Langfuse 回调实现可观测链路。
 """
+from uuid import uuid4
+
 from langgraph.graph import END, START, StateGraph
 
 from app.agent.intent import classify_intent
@@ -12,6 +14,7 @@ from app.agent.nodes.core import (
     make_execute_tool_node,
     make_reason_node,
     make_retrieve_node,
+    make_rewrite_node,
     make_route_node,
 )
 from app.agent.state import AgentState
@@ -21,10 +24,10 @@ _MAX_STEPS = 6
 
 
 def _route_after_route(state: dict) -> str:
-    """意图分流：经营分析跳过 RAG，直接进入工具推理。"""
+    """意图分流：经营分析跳过 RAG，直接进入工具推理；客服先改写检索 query。"""
     if state.get("intent") == "analytics":
         return "reason"
-    return "retrieve"
+    return "rewrite"
 
 
 def _route_after_reason(state: dict) -> str:
@@ -45,6 +48,7 @@ def build_graph(registry: ToolRegistry):
     """构建状态图：registry 已绑定当前会话与用户。"""
     graph = StateGraph(AgentState)
     graph.add_node("route", make_route_node())
+    graph.add_node("rewrite", make_rewrite_node())
     graph.add_node("retrieve", make_retrieve_node())
     graph.add_node("reason", make_reason_node(registry))
     graph.add_node("execute_tool", make_execute_tool_node(registry))
@@ -54,8 +58,9 @@ def build_graph(registry: ToolRegistry):
     graph.add_conditional_edges(
         "route",
         _route_after_route,
-        {"retrieve": "retrieve", "reason": "reason"},
+        {"rewrite": "rewrite", "reason": "reason"},
     )
+    graph.add_edge("rewrite", "retrieve")
     graph.add_edge("retrieve", "reason")
     graph.add_conditional_edges(
         "reason",
@@ -85,9 +90,13 @@ def build_agent(
     """
     from app.agent.tools.analytics_tools import build_analytics_tools
     from app.agent.tools.order_tools import build_order_tools
+    from app.agent.tools.order_write_tools import build_order_write_tools
     from app.agent.tools.product_tools import build_product_tools
 
     intent = intent or classify_intent(question)
+    # 写工具的同轮防护依赖 run_id 非空：同一轮内先 prepare 再 confirm 会被拒。
+    # eval/runner 之类的脚本入口不传 run_id，这里兜底生成，保证守卫不会被空值绕过。
+    run_id = run_id or uuid4().hex
     # 越权防护：经营分析工具聚合的是「全部用户」的销售数据，仅管理员可用。
     # 普通用户即使问题命中分析意图，也回退到客服工具集（订单/商品均按 user_id 隔离）。
     if intent == "analytics" and user_role != "admin":
@@ -96,7 +105,12 @@ def build_agent(
     if intent == "analytics":
         tools = build_analytics_tools(db)
     else:
-        tools = build_order_tools(db, user_id) + build_product_tools(db)
+        # 写工具只进客服分支：经营分析是只读场景，不该具备下单能力。
+        tools = (
+            build_order_tools(db, user_id)
+            + build_product_tools(db)
+            + build_order_write_tools(db, user_id, run_id)
+        )
 
     registry = ToolRegistry(tools)
     graph = build_graph(registry)
@@ -106,7 +120,7 @@ def build_agent(
         "history": history or [],
         "intent": intent,
         "max_steps": _MAX_STEPS,
-        "run_id": run_id or "",
+        "run_id": run_id,
     }
     config = {"callbacks": callbacks or []}
     return graph, initial, config
@@ -121,7 +135,7 @@ async def run_agent(
     callbacks: list | None = None,
     user_role: str | None = None,
 ) -> dict:
-    """统一非流式入口：返回 {answer, citations, steps}。"""
+    """统一非流式入口：返回 {answer, citations, steps, tool_events}。"""
     graph, initial, config = build_agent(
         db, user_id, question, history, run_id, callbacks, user_role=user_role
     )
@@ -129,7 +143,9 @@ async def run_agent(
     return {
         "answer": result.get("answer", ""),
         "citations": result.get("citations", []),
+        "rewritten_query": result.get("rewritten_query", ""),
         "steps": result.get("steps", []),
+        "tool_events": result.get("tool_events", []),
         "retrieved": result.get("retrieved", []),
         "intent": result.get("intent", ""),
     }

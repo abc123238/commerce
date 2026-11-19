@@ -1,7 +1,10 @@
 """集中导出所有模型，供 SQLAlchemy metadata 发现与 Alembic autogenerate 使用。"""
 from app.db.base import Base
+from app.db.models.analytics_agg import DailyCategorySalesAgg, DailySalesAgg
 from app.db.models.cart import Cart, CartItem
+from app.db.models.eval import EvalCaseResult, EvalRun
 from app.db.models.order import Order, OrderItem, OrderStatus, Payment
+from app.db.models.order_event import OrderStatusEvent
 from app.db.models.product import Category, Product
 from app.db.models.user import User
 
@@ -16,4 +19,9 @@ __all__ = [
     "OrderItem",
     "OrderStatus",
     "Payment",
+    "EvalRun",
+    "EvalCaseResult",
+    "OrderStatusEvent",
+    "DailySalesAgg",
+    "DailyCategorySalesAgg",
 ]

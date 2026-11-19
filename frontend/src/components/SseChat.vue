@@ -100,6 +100,7 @@ const scroller = ref(null)
 function nodeLabel(node) {
   return {
     route: '意图识别',
+    rewrite: '查询改写',
     retrieve: '知识检索',
     reason: 'LLM 推理',
     execute_tool: '工具调用',
@@ -110,6 +111,7 @@ function nodeLabel(node) {
 function nodeType(node) {
   return {
     route: 'primary',
+    rewrite: 'primary',
     retrieve: 'success',
     reason: 'warning',
     execute_tool: 'danger',

@@ -1,12 +1,12 @@
-"""订单接口（需登录）：下单 / 列表 / 详情 / 模拟支付 / 取消。"""
+"""订单接口（需登录）：下单 / 列表 / 详情 / 模拟支付 / 取消 / 物流轨迹。"""
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.order import OrderListOut, OrderOut
-from app.services import order_service
+from app.schemas.order import OrderListOut, OrderOut, TrackingOut
+from app.services import logistics_service, order_service
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -55,3 +55,18 @@ async def cancel_order(
     user: User = Depends(get_current_user),
 ) -> OrderOut:
     return await order_service.cancel_order(db, order_no, user.id)
+
+
+@router.get("/{order_no}/tracking", response_model=TrackingOut)
+async def get_order_tracking(
+    order_no: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TrackingOut:
+    """查询订单物流轨迹（模拟物流）。
+
+    查询本身会幂等地推进订单状态（paid -> shipped -> completed），
+    这是有意的惰性更新：不引入后台任务，状态只在被查看时前进。
+    """
+    info = await logistics_service.get_tracking(db, order_no, user.id)
+    return TrackingOut.model_validate(info)

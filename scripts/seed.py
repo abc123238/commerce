@@ -6,8 +6,10 @@
 用法：uv run python -m scripts.seed
 """
 import asyncio
+import sys
+from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.core.security import hash_password, verify_password as _verify_password
 from app.db.models.cart import Cart, CartItem
@@ -15,6 +17,10 @@ from app.db.models.order import Order, OrderItem, OrderStatus
 from app.db.models.product import Category, Product
 from app.db.models.user import User
 from app.db.session import SessionLocal
+from app.services import order_event_service
+
+_DEMO_UNPAID_ORDER_NO = "ORDDEMO000000000001"
+_DEMO_PAID_ORDER_NO = "ORDDEMO000000000002"
 
 # (分类名, [(商品名, 描述, 价格, 库存, 状态), ...])
 CATALOG: list[tuple[str, list[tuple[str, str, str, int, str]]]] = [
@@ -85,16 +91,93 @@ USERS: list[tuple[str, str, str]] = [
 ]
 
 
+async def _rebuild_demo_events(session, orders: list[Order]) -> None:
+    """按订单当前时间戳重建演示订单事件。
+
+    seed 会把已支付订单收敛回 paid 并清空物流字段；若只追加事件，
+    历史 shipped/completed 事件会残留，导致漏斗与停留时长统计失真。
+    """
+    now = datetime.now(timezone.utc)
+    for order in orders:
+        await order_event_service.delete_order_events(session, order.id)
+        await order_event_service.record_event(
+            session,
+            order_id=order.id,
+            to_status=OrderStatus.CREATED,
+            occurred_at=order.created_at or now,
+            source="seed",
+            actor_user_id=order.user_id,
+        )
+        if order.paid_at is not None:
+            await order_event_service.record_event(
+                session,
+                order_id=order.id,
+                to_status=OrderStatus.PAID,
+                from_status=OrderStatus.CREATED,
+                occurred_at=order.paid_at,
+                source="seed",
+                actor_user_id=order.user_id,
+            )
+        if order.cancelled_at is not None:
+            await order_event_service.record_event(
+                session,
+                order_id=order.id,
+                to_status=OrderStatus.CANCELLED,
+                from_status=OrderStatus.CREATED,
+                occurred_at=order.cancelled_at,
+                source="seed",
+                actor_user_id=order.user_id,
+            )
+        if order.shipped_at is not None:
+            await order_event_service.record_event(
+                session,
+                order_id=order.id,
+                to_status=OrderStatus.SHIPPED,
+                from_status=OrderStatus.PAID,
+                occurred_at=order.shipped_at,
+                source="seed",
+                actor_user_id=order.user_id,
+            )
+        if order.completed_at is not None:
+            await order_event_service.record_event(
+                session,
+                order_id=order.id,
+                to_status=OrderStatus.COMPLETED,
+                from_status=OrderStatus.SHIPPED,
+                occurred_at=order.completed_at,
+                source="seed",
+                actor_user_id=order.user_id,
+            )
+
+
 async def _seed_demo_orders(session) -> None:
-    """为 demo 用户造 2 笔演示订单（一已支付、一待支付），幂等。"""
+    """为 demo 用户造 2 笔演示订单（一已支付、一待支付），幂等。
+
+    已存在时把「已支付」那笔收敛回 paid 并刷新支付时间，因此重跑 seed
+    即一键重置模拟物流轨迹——否则订单被惰性推进到「已签收」后就永久停住，
+    没法再演示轨迹随时间前进的过程。
+    """
     demo = await session.scalar(select(User).where(User.email == "demo@example.com"))
     if demo is None:
         return
-    count = await session.scalar(
-        select(func.count()).select_from(Order).where(Order.user_id == demo.id)
+
+    existing = list(
+        await session.scalars(
+            select(Order).where(Order.order_no.in_([_DEMO_UNPAID_ORDER_NO, _DEMO_PAID_ORDER_NO]))
+        )
     )
-    if count:
-        print(f"跳过演示订单（demo 已有 {count} 笔）")
+    if existing:
+        for order in existing:
+            if order.order_no == _DEMO_PAID_ORDER_NO:
+                order.status = OrderStatus.PAID
+                order.paid_at = datetime.now(timezone.utc)
+                order.shipped_at = None
+                order.completed_at = None
+                order.tracking_no = None
+                order.carrier = None
+        await session.flush()
+        await _rebuild_demo_events(session, existing)
+        print(f"重置 {len(existing)} 笔演示订单的物流状态")
         return
 
     products = list(
@@ -118,7 +201,7 @@ async def _seed_demo_orders(session) -> None:
     await session.flush()
 
     # 订单1：待支付
-    o1 = Order(order_no="ORDDEMO000000000001", user_id=demo.id, total=0)
+    o1 = Order(order_no=_DEMO_UNPAID_ORDER_NO, user_id=demo.id, total=0)
     session.add(o1)
     await session.flush()
     o1.total = products[0].price * 1 + products[1].price * 2
@@ -129,15 +212,17 @@ async def _seed_demo_orders(session) -> None:
         ]
     )
     # 订单2：已支付
-    o2 = Order(order_no="ORDDEMO000000000002", user_id=demo.id, total=0)
+    o2 = Order(order_no=_DEMO_PAID_ORDER_NO, user_id=demo.id, total=0)
     session.add(o2)
     await session.flush()
     o2.total = products[0].price * 1
     o2.status = OrderStatus.PAID
-    o2.paid_at = __import__("datetime").datetime.now()
+    o2.paid_at = datetime.now(timezone.utc)
     session.add(
         OrderItem(order_id=o2.id, product_id=products[0].id, product_name=products[0].name, quantity=1, unit_price=products[0].price)
     )
+    await session.flush()
+    await _rebuild_demo_events(session, [o1, o2])
     print("创建 2 笔演示订单（demo 用户）")
 
 
@@ -215,4 +300,7 @@ async def seed() -> None:
 
 
 if __name__ == "__main__":
+    # Windows 控制台默认 GBK，末行的 ✅ 会抛 UnicodeEncodeError 让脚本以非 0 退出
+    # （数据其实已提交，但 `seed && 后续命令` 的链式调用会因此中断）
+    sys.stdout.reconfigure(errors="replace")
     asyncio.run(seed())

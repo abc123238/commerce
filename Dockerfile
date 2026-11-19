@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # 多阶段构建：uv 解析依赖 -> 精简运行时（非 root + healthcheck）。
 # 构建时预下载 embedding 模型，容器启动免首次联网下载。
 # 注意：builder 用 python:3.12-slim + pip 安装 uv，避开 ghcr.io（国内拉取极慢）；

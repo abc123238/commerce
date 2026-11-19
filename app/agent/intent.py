@@ -8,6 +8,7 @@ _ANALYTICS_KEYWORDS = [
     "增长", "环比", "同比", "畅销", "最好卖", "卖得最好", "卖得好", "热销",
     "排行榜", "榜单", "排名", "走势", "汇总", "经营", "总额", "日均",
     "复购", "客单价", "趋势", "销售额", "数据", "月度", "季度",
+    "卖了多少", "平均每天", "总订单",
 ]
 
 _CUSTOMER_KEYWORDS = [
@@ -23,11 +24,10 @@ def classify_intent(question: str) -> str:
     按关键词加权：分析词 +1，客服词 -1；得分 >0 判为分析，否则客服。
     """
     q = question or ""
-    score = 0
-    for kw in _ANALYTICS_KEYWORDS:
-        if kw in q:
-            score += 1
-    for kw in _CUSTOMER_KEYWORDS:
-        if kw in q:
-            score -= 1
-    return "analytics" if score > 0 else "customer_service"
+    analytics_hits = sum(1 for kw in _ANALYTICS_KEYWORDS if kw in q)
+    customer_hits = sum(1 for kw in _CUSTOMER_KEYWORDS if kw in q)
+    # 有分析信号时平局也判分析：「今天总订单数是多少」同时命中「总订单」「订单」，
+    # 但它问的是经营数据而非某个订单；完全没有分析信号时才归客服。
+    if analytics_hits and analytics_hits - customer_hits >= 0:
+        return "analytics"
+    return "customer_service"

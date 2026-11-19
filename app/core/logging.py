@@ -40,3 +40,6 @@ def setup_logging(debug: bool = False) -> None:
 
 def get_logger(name: str = "app") -> structlog.stdlib.BoundLogger:
     return structlog.get_logger(name)
+
+
+

@@ -8,6 +8,9 @@ def test_analytics_questions():
     assert classify_intent("哪些商品最好卖，出个畅销榜") == "analytics"
     assert classify_intent("哪个商品卖得最好，出个畅销榜") == "analytics"  # "卖得最好" 词序回归
     assert classify_intent("最近七天的日均销量趋势怎么样") == "analytics"
+    assert classify_intent("电子产品今天卖了多少钱") == "analytics"
+    assert classify_intent("今天总订单数是多少") == "analytics"
+    assert classify_intent("最近一周平均每天卖多少钱") == "analytics"
 
 
 def test_customer_service_questions():

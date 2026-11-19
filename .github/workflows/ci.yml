@@ -1,0 +1,98 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# CI 边界：只跑确定性测试与迁移校验。
+# 不跑真实 LLM 评测、Qdrant 检索测试、Redis 下单测试与门禁——
+# 它们依赖外部模型/服务或会产生非确定性结果，命令见 docs/eval.md。
+env:
+  ENV: test
+  JWT_SECRET_KEY: ci-only-secret-key-0123456789
+  POSTGRES_HOST: 127.0.0.1
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: commerce
+  POSTGRES_PASSWORD: commerce
+  POSTGRES_DB: commerce
+  REDIS_URL: redis://127.0.0.1:6379/0
+  QDRANT_URL: http://127.0.0.1:6333
+
+jobs:
+  backend-unit:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: commerce
+          POSTGRES_PASSWORD: commerce
+          POSTGRES_DB: commerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U commerce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Unit tests
+        # conftest 导入时会创建测试库，因此纯单测也需要 Postgres service
+        run: uv run pytest -m "not integration" -q
+
+  backend-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: commerce
+          POSTGRES_PASSWORD: commerce
+          POSTGRES_DB: commerce
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U commerce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Validate full migration chain
+        run: uv run alembic upgrade head
+      - name: Postgres-only integration tests
+        run: >-
+          uv run pytest
+          app/tests/test_eval_datasets.py
+          app/tests/test_eval_service.py
+          app/tests/test_eval_api.py
+          app/tests/test_analytics_service.py
+          app/tests/test_analytics_reconciliation.py
+          app/tests/test_order_status_events.py
+          app/tests/test_analytics_tools.py
+          -q
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
